@@ -97,7 +97,7 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 
 	err := bcrypt.CompareHashAndPassword(hashedBytePassword, bytePassword)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("wrong password: %v", err), http.StatusUnprocessableEntity)
+		respondJSON(w, map[string]string{"password": "wrong password"}, http.StatusUnprocessableEntity)
 		return
 	}
 
