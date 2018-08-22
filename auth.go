@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
 	"strconv"
@@ -79,7 +78,6 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 		&user.HashedPassword,
 		&user.CreatedAt,
 	); err == sql.ErrNoRows {
-		fmt.Println("not found:", err)
 		http.Error(w,
 			http.StatusText(http.StatusNotFound),
 			http.StatusNotFound)
