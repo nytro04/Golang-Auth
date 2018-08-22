@@ -27,8 +27,8 @@ type CreateUserInput struct {
 // User model.
 type User struct {
 	ID             string    `json:"id,omitempty"`
-	Username       string    `json:"username,omitempty"`
-	Email          string    `json:"email"`
+	Username       string    `json:"username"`
+	Email          string    `json:"email,omitempty"`
 	HashedPassword string    `json:"-"`
 	CreatedAt      time.Time `json:"createdAt"`
 }
