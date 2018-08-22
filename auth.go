@@ -3,54 +3,79 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
-	"github.com/dgrijalva/jwt-go"
+	"github.com/knq/jwt"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// User Input request body
+// LoginInput request body.
 type LoginInput struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
-// LoginPayload respond body
+// LoginPayload respond body.
 type LoginPayload struct {
 	AuthUser  User      `json:"authUser"`
-	JWT       string    `json:"jwt"`
+	Token     string    `json:"token"`
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
-var jwtKey = env("JWT_KEY", "dontT3ll@ny0ne")
+// OK checks for semantic errors.
+func (input LoginInput) OK() (map[string]string, bool) {
+	errs := make(map[string]string)
+
+	input.Email = strings.TrimSpace(input.Email)
+	if input.Email == "" {
+		errs["email"] = "email required"
+	} else if !rxEmail.MatchString(input.Email) {
+		errs["email"] = "invalid email"
+	}
+
+	input.Password = strings.TrimSpace(input.Password)
+	if input.Password == "" {
+		errs["password"] = "password required"
+	}
+
+	if len(errs) != 0 {
+		return errs, false
+	}
+
+	return nil, true
+}
+
+const tokenLifespan = time.Hour * 24 * 365 // One year
 
 func loginUser(w http.ResponseWriter, r *http.Request) {
 	// Decode request body
+	defer r.Body.Close()
 	var input LoginInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		log.Println(err)
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer r.Body.Close()
 
-	email := input.Email
-	password := input.Password
+	if errs, ok := input.OK(); !ok {
+		respondJSON(w, errs, http.StatusUnprocessableEntity)
+		return
+	}
 
 	// Find user on the database with the email and password
 	var user User
 	if err := db.QueryRowContext(r.Context(), `
-		SELECT id, username, email, hashed_password, created_at
+		SELECT id, username, hashed_password, created_at
 		FROM users
 		WHERE email = $1
-	`, email).Scan(
+	`, input.Email).Scan(
 		&user.ID,
 		&user.Username,
-		user.Email,
-		&user.Password,
+		&user.HashedPassword,
 		&user.CreatedAt,
 	); err == sql.ErrNoRows {
 		http.Error(w,
@@ -62,38 +87,55 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bytePassword := []byte(password)
-	hashedBytePassword := []byte(user.Password)
+	user.Email = input.Email
+	bytePassword := []byte(input.Password)
+	hashedBytePassword := []byte(user.HashedPassword)
 
 	log.Println(user)
 
 	err := bcrypt.CompareHashAndPassword(hashedBytePassword, bytePassword)
 	if err != nil {
-		respondError(w, fmt.Errorf("Wrong password: %v", err))
+		respondJSON(w, map[string]string{"password": "wrong password"}, http.StatusUnprocessableEntity)
 		return
 	}
 
 	// Isuer a JWT
-	expires := time.Now().Add(time.Hour * 24 * 365) // one year
-	tokenString, err := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.StandardClaims{
-		Subject:   user.ID,
-		ExpiresAt: expires.Unix(),
-	}).SignedString([]byte(jwtKey))
+	token, exp, err := issueToken(user.ID)
 	if err != nil {
 		respondError(w, err)
 		return
 	}
 
 	// Respond with the JWT
-	http.SetCookie(w, &http.Cookie{
-		Name:    "jwt",
-		Value:   tokenString,
-		Path:    "/",
-		Expires: expires,
-	})
+	http.SetCookie(w, createTokenCookie(token, exp))
 
 	log.Println(user)
 
-	respondJSON(w, LoginPayload{user, tokenString, expires}, http.StatusOK)
+	respondJSON(w, LoginPayload{
+		AuthUser:  user,
+		Token:     token,
+		ExpiresAt: exp,
+	}, http.StatusOK)
+}
 
+func issueToken(userID string) (token string, exp time.Time, err error) {
+	exp = time.Now().Add(tokenLifespan)
+	t, err := jwtSigner.Encode(jwt.Claims{
+		Subject:    userID,
+		Expiration: json.Number(strconv.FormatInt(exp.Unix(), 10)),
+	})
+	if err != nil {
+		return "", exp, err
+	}
+	return string(t), exp, nil
+}
+
+func createTokenCookie(token string, exp time.Time) *http.Cookie {
+	return &http.Cookie{
+		Name:     "token",
+		Value:    token,
+		Path:     "/",
+		Expires:  exp,
+		HttpOnly: true,
+	}
 }

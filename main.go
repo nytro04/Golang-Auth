@@ -10,8 +10,8 @@ import (
 	"strconv"
 
 	"github.com/gorilla/mux"
-
 	"github.com/knq/jwt"
+	_ "github.com/lib/pq"
 )
 
 var (
@@ -19,24 +19,32 @@ var (
 	db        *sql.DB
 )
 
-func env(key, fallbackValue string) string {
-	value, ok := os.LookupEnv(key)
-	if !ok {
-		return fallbackValue
-	}
-	return value
-}
+func main() {
+	port := intEnv("PORT", 3000)
+	jwtKey := env("JWT_KEY", "dontT3ll@ny0ne")
+	databaseURL := env("DATABASE_URL", "postgresql://root@127.0.0.1:26257/shop_api?sslmode=disable")
 
-func intEnv(key string, fallbackValue int) int {
-	value, ok := os.LookupEnv(key)
-	if !ok {
-		return fallbackValue
+	var err error
+	if db, err = sql.Open("postgres", databaseURL); err != nil {
+		log.Fatalf("could not open database connection: %v\n", err)
+		return
 	}
-	intValue, err := strconv.Atoi(value)
-	if err != nil {
-		return fallbackValue
+	defer db.Close()
+	if err = db.Ping(); err != nil {
+		log.Fatalf("could not ping database: %v\n", err)
 	}
-	return intValue
+
+	if jwtSigner, err = jwt.HS256.New([]byte(jwtKey)); err != nil {
+		log.Fatalf("could not create JWT signer: %v\n", err)
+		return
+	}
+
+	mux := mux.NewRouter()
+	mux.HandleFunc("/api/users", createUser).Methods("POST")
+	mux.HandleFunc("/api/login", loginUser).Methods("POST")
+
+	log.Printf("accepting connections on port: %d\n", port)
+	log.Fatalln(http.ListenAndServe(fmt.Sprintf(":%d", port), mux))
 }
 
 func respondJSON(w http.ResponseWriter, payload interface{}, code int) {
@@ -57,33 +65,22 @@ func respondError(w http.ResponseWriter, err error) {
 		http.StatusInternalServerError)
 }
 
-func main() {
-	port := intEnv("PORT", 3000)
-	// jwtKey := env("JWT_KEY", "dontT3ll@ny0ne")
-	databaseURL := env("DATABASE_URL", "postgresql://root@127.0.0.1:26257/shop_api?sslmode=disable")
-
-	var err error
-
-	if db, err = sql.Open("postgres", databaseURL); err != nil {
-		log.Fatalf("could not open database connection: %v\n", err)
-		return
+func env(key, fallbackValue string) string {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return fallbackValue
 	}
-	defer db.Close()
-	if err = db.Ping(); err != nil {
-		log.Fatalf("could not ping database: %v\n", err)
+	return value
+}
+
+func intEnv(key string, fallbackValue int) int {
+	value, ok := os.LookupEnv(key)
+	if !ok {
+		return fallbackValue
 	}
-
-	if jwtSigner, err = jwt.HS256.New([]byte(jwtKey)); err != nil {
-		log.Fatalf("could not create JWT signer: %v\n", err)
-		return
+	intValue, err := strconv.Atoi(value)
+	if err != nil {
+		return fallbackValue
 	}
-	mux := mux.NewRouter()
-
-	mux.HandleFunc("/api/users", createUser).Methods("POST")
-	mux.HandleFunc("/api/login", loginUser).Methods("POST")
-
-	log.Printf("accepting connections on port: %d\n", port)
-
-	log.Fatalln(http.ListenAndServe(fmt.Sprintf(":%d", port), mux))
-
+	return intValue
 }
