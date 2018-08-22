@@ -3,10 +3,9 @@ CREATE DATABASE IF NOT EXISTS shop_api;
 SET DATABASE = shop_api;
 
 CREATE TABLE IF NOT EXISTS users (
-    id SERIAL NOT NULL PRIMARY KEY UNIQUE,
+    id SERIAL NOT NULL PRIMARY KEY,
     username STRING NOT NULL UNIQUE,
     email STRING NOT NULL UNIQUE,
-    hashed_password NOT NULL STRING,
+    hashed_password STRING NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
